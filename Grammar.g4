@@ -1,10 +1,17 @@
 grammar Grammar;
 
-program                     : main_function
+program                     : (function)*  main_function (function)*
                             ;
 
 main_function               : BEGINMAIN ENDMAIN
                             | BEGINMAIN statements ENDMAIN
+                            ;
+
+function                    : BEGINFUNCTION IDENTIFIER statements ENDFUNCTION   #voidfunction
+                            | BEGINFUNCTION IDENTIFIER (arg)* ENDARGS statements ENDFUNCTION #novoidfunction
+                            ;
+
+arg                         : ARG IDENTIFIER
                             ;
 
 statements                  : statement*
@@ -15,6 +22,18 @@ statement                   : var_decl_stmt
                             | print_stmt
                             | condition_stmt
                             | while_stmt
+                            | var_assign_from_func_stmt
+                            | call_function
+                            | return_function
+                            ;
+
+var_assign_from_func_stmt   : VARASSIGNFROMFUN IDENTIFIER call_function
+                            ;
+
+call_function               : CALLFUNC IDENTIFIER (expression)*
+                            ;
+
+return_function             : RETURN IDENTIFIER
                             ;
 
 print_stmt                  : print_var_stmt
@@ -61,6 +80,13 @@ operation                   : PLUSOPERATOR expression           #plusop
 
 BEGINMAIN                   : 'IT\'S SHOWTIME' ;
 ENDMAIN                     : 'YOU HAVE BEEN TERMINATED' ;
+BEGINFUNCTION               : 'LISTEN TO ME VERY CAREFULLY' ;
+ENDFUNCTION                 : 'HASTA LA VISTA, BABY' ;
+VARASSIGNFROMFUN            : 'GET YOUR ASS TO MARS' ;
+CALLFUNC                    : 'DO IT NOW' ;
+ARG                         : 'I NEED YOUR CLOTHES YOUR BOOTS AND YOUR MOTORCYCLE' ;
+ENDARGS                     : 'GIVE THESE PEOPLE AIR' ;
+RETURN                      : 'I\'LL BE BACK' ;
 AT                          : '@' ;
 TRUE                        : 'NO PROBLEMO' ;
 FALSE                       : 'I LIED' ;
@@ -83,7 +109,7 @@ ELSE                        : 'BULLSHIT' ;
 ENDIF                       : 'YOU HAVE NO RESPECT FOR LOGIC' ;
 WHILE                       : 'STICK AROUND' ;
 ENDWHILE                    : 'CHILL' ;
-IDENTIFIER                  : [a-zA-Z]+ ;
+IDENTIFIER                  : [a-zA-Z] [a-zA-Z0-9]* ;
 NUMBER                      : DIGIT+ ;
 STRING                      : STRING_F ;
 WS                          : [ \r\n\t]+ -> skip ;
