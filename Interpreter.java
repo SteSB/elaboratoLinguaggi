@@ -2,113 +2,186 @@ import value.ExpValue;
 import value.StringValue;
 import value.Value;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 import java.util.function.Function;
 
 public class Interpreter extends GrammarBaseVisitor<Object> {
 
-    private Map<String, Object> mem = new HashMap<>();
+    private Map<String, FunctionInfo> functions = new HashMap<>();
+    private Deque<FunctionInfo> callStack = new ArrayDeque<>();
+    private Object returnValue = null;
+
+    private static class FunctionInfo {
+        String name;
+        Map<String, Object> variables;
+        int staticDepth;
+        GrammarParser.StatementsContext functionBody;
+        List<String> parameters;
+
+        FunctionInfo(String name, int staticDepth, GrammarParser.StatementsContext functionBody, List<String> parameters) {
+            this.name = name;
+            this.variables = new HashMap<>();
+            this.staticDepth = staticDepth;
+            this.functionBody = functionBody;
+            this.parameters = parameters;
+        }
+    }
 
     @Override
     public Object visitProgram(GrammarParser.ProgramContext ctx) {
-        //System.out.println("program");
         return visitChildren(ctx);
     }
 
     @Override
     public Object visitMain_function(GrammarParser.Main_functionContext ctx) {
-        //System.out.println("main_function");
-        return visitChildren(ctx);
+        FunctionInfo mainFunction = new FunctionInfo("main", 0, ctx.statements(), new ArrayList<>());
+        functions.put("main", mainFunction);
+
+        callStack.push(mainFunction);
+
+        visitChildren(ctx.statements());
+
+        callStack.pop();
+
+        return null;
+    }
+
+    @Override
+    public Object visitVoidfunction(GrammarParser.VoidfunctionContext ctx) {
+        String id = ctx.IDENTIFIER().getText();
+        int staticDepth = callStack.isEmpty() ? 0 : callStack.peek().staticDepth + 1;
+        FunctionInfo function = new FunctionInfo(id, staticDepth, ctx.statements(), new ArrayList<>());
+        functions.put(id, function);
+        return null;
+    }
+
+    @Override
+    public Object visitNovoidfunction(GrammarParser.NovoidfunctionContext ctx) {
+        String id = ctx.IDENTIFIER().getText();
+        int staticDepth = callStack.isEmpty() ? 0 : callStack.peek().staticDepth + 1;
+        List<String> parameters = ctx.arg().stream().map(arg -> arg.IDENTIFIER().getText()).collect(Collectors.toList());
+        FunctionInfo function = new FunctionInfo(id, staticDepth, ctx.statements(), parameters);
+        functions.put(id, function);
+        return null;
+    }
+
+    @Override
+    public Object visitCall_function(GrammarParser.Call_functionContext ctx) {
+        String id = ctx.IDENTIFIER().getText();
+
+        if (functions.containsKey(id)) {
+            FunctionInfo function = functions.get(id);
+            callStack.push(function);
+
+            List<GrammarParser.ExpressionContext> args = ctx.expression();
+            if (args.size() != function.parameters.size()) {
+                throw new RuntimeException("Numero di argomenti non corrisponde per la funzione " + id);
+            }
+
+            for (int i = 0; i < args.size(); i++) {
+                String paramName = function.parameters.get(i);
+                Object value = visit(args.get(i));
+                function.variables.put(paramName, value);
+            }
+
+            // Esegui il corpo della funzione
+            visit(function.functionBody);
+
+            callStack.pop();
+
+            // Restituisci il valore di ritorno
+            Object ret = returnValue;
+            returnValue = null; // Resetta il valore di ritorno per la prossima chiamata di funzione
+            return ret;
+        } else {
+            throw new RuntimeException("Errore nella chiamata alla funzione " + id);
+        }
+    }
+
+    @Override
+    public Object visitReturn_function(GrammarParser.Return_functionContext ctx) {
+        String id = ctx.IDENTIFIER().getText();
+
+        if (!callStack.isEmpty() && callStack.peek().variables.containsKey(id)) {
+            returnValue = callStack.peek().variables.get(id);
+        } else {
+            throw new RuntimeException("Variable " + id + " not defined.");
+        }
+
+        return returnValue;
     }
 
     @Override
     public Object visitStatements(GrammarParser.StatementsContext ctx) {
-        //System.out.println("statements");
         return visitChildren(ctx);
     }
 
     @Override
     public Object visitStatement(GrammarParser.StatementContext ctx) {
-        //System.out.println("statement");
         return visitChildren(ctx);
     }
 
     @Override
     public Object visitPrint_stmt(GrammarParser.Print_stmtContext ctx) {
-        //System.out.println("print_stmt");
         return visitChildren(ctx);
     }
 
     @Override
     public Object visitPrint_sconst_stmt(GrammarParser.Print_sconst_stmtContext ctx) {
-        //System.out.println("print_sconst_stmt");
-        String text = ctx.getChild(1).getText();
+        String text = ctx.STRING().getText();
+        if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
+            text = text.substring(1, text.length() - 1);
+        }
         System.out.println(text);
         return visitChildren(ctx);
     }
 
     @Override
     public Object visitPrint_var_stmt(GrammarParser.Print_var_stmtContext ctx) {
-        //System.out.println("print_var_stmt");
-        System.out.println(mem.get(ctx.getChild(1).getText()));
+        String id = ctx.getChild(1).getText();
+        if (callStack.peek().variables.containsKey(id)) {
+            System.out.println(callStack.peek().variables.get(id));
+        } else {
+            throw new RuntimeException("Variable " + id + " not defined.");
+        }
         return visitChildren(ctx);
     }
 
     @Override
     public Object visitVar_decl_stmt(GrammarParser.Var_decl_stmtContext ctx) {
-        //System.out.println("var_decl_stmt");
-        Object var = visit(ctx.getChild(3));
-        mem.put(ctx.getChild(1).getText(), var);
-        return visitChildren(ctx);
+        String id = ctx.IDENTIFIER().getText();
+        int value = (Integer) visit(ctx.expression());
+        callStack.peek().variables.put(id, value);
+        return null;
     }
 
     @Override
     public Object visitVar_assign_stmt(GrammarParser.Var_assign_stmtContext ctx) {
-        String key = ctx.getChild(1).getText();
-        Object value = visit(ctx.getChild(3));
-        Function<Integer, Integer> func = (Function<Integer, Integer>) visit(ctx.getChild(4));
-        mem.put(key, func.apply((Integer) value));
-        //System.out.println("var_assign_stmt -> " + key + " = " + func.apply((Integer) value));
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Object visitIfelseendif(GrammarParser.IfelseendifContext ctx) {
-        //System.out.println("ifElseEndif");
-        if ((Integer) visit(ctx.getChild(1)) == 1) {
-            return visit(ctx.getChild(2));
-        } else {
-            return visit(ctx.getChild(4));
-        }
-    }
-
-    @Override
-    public Object visitIfendid(GrammarParser.IfendidContext ctx) {
-        //System.out.println("ifEndif");
-        if ((Integer) visit(ctx.getChild(1)) == 1) {
-            return visit(ctx.getChild(2));
-        }
+        String id = ctx.IDENTIFIER().getText();
+        int value = (Integer) visit(ctx.expression());
+        value = applyOperations(value, ctx.operations());
+        callStack.peek().variables.put(id, value);
         return null;
     }
 
-    @Override
-    public Object visitWhile_stmt(GrammarParser.While_stmtContext ctx) {
-        //System.out.println("while_stmt");
-        while ((Integer) visit(ctx.getChild(1)) == 1) {
-            visit(ctx.getChild(2));
-        }
-        return null;
+    private int applyOperations(int initialValue, GrammarParser.OperationsContext ctx) {
+        Function<Integer, Integer> operation = (Function<Integer, Integer>) visit(ctx);
+        return operation.apply(initialValue);
     }
 
     @Override
     public Object visitVarexpr(GrammarParser.VarexprContext ctx) {
-        return mem.get(ctx.getChild(0).getText());
+        String id = ctx.IDENTIFIER().getText();
+        for (FunctionInfo elm : callStack)
+            if(elm.variables.containsKey(id))
+                return elm.variables.get(id);
+        throw new RuntimeException("Variable " + id + " not defined.");
     }
 
     @Override
     public Object visitNumberexpr(GrammarParser.NumberexprContext ctx) {
-        return Integer.parseInt(ctx.getChild(0).getText());
+        return Integer.parseInt(ctx.NUMBER().getText());
     }
 
     @Override
@@ -122,14 +195,31 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitOperations(GrammarParser.OperationsContext ctx) {
-        if (ctx.getChildCount() > 1) {
-            Function<Integer, Integer> func = (Function<Integer, Integer>) visit(ctx.getChild(0));
-            Function<Integer, Integer> op = (Function<Integer, Integer>) visit(ctx.getChild(1));
-            return (Function<Integer, Integer>) (x -> op.apply(func.apply(x)));
+    public Object visitIfelseendif(GrammarParser.IfelseendifContext ctx) {
+        boolean condition = (Integer) visit(ctx.expression()) != 0;
+        if (condition) {
+            visit(ctx.statements(0));
         } else {
-            return visit(ctx.getChild(0));
+            visit(ctx.statements(1));
         }
+        return null;
+    }
+
+    @Override
+    public Object visitIfendid(GrammarParser.IfendidContext ctx) {
+        boolean condition = (Integer) visit(ctx.expression()) != 0;
+        if (condition) {
+            visit(ctx.statements());
+        }
+        return null;
+    }
+
+    @Override
+    public Object visitWhile_stmt(GrammarParser.While_stmtContext ctx) {
+        while ((Integer) visit(ctx.expression()) != 0) {
+            visit(ctx.statements());
+        }
+        return null;
     }
 
     @Override
@@ -159,97 +249,24 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     @Override
     public Object visitEqualop(GrammarParser.EqualopContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> x == var ? 1 : 0);
+        return (Function<Integer, Integer>) (x -> (x == var) ? 1 : 0);
     }
 
     @Override
     public Object visitGreaterop(GrammarParser.GreateropContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> x > var ? 1 : 0);
+        return (Function<Integer, Integer>) (x -> (x > var) ? 1 : 0);
     }
 
     @Override
     public Object visitOrop(GrammarParser.OropContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> x == 0 && var == 0 ? 0 : 1);
+        return (Function<Integer, Integer>) (x -> (x == 1 || var == 1) ? 1 : 0);
     }
 
     @Override
     public Object visitAndop(GrammarParser.AndopContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> x != 0 && var != 0 ? 1 : 0);
+        return (Function<Integer, Integer>) (x -> (x == 1 && var == 1) ? 1 : 0);
     }
-
-    /*private final Conf conf;
-
-    public Interpreter(Conf conf) {
-        this.conf = conf;
-    }
-
-    @Override
-    public Value visitProgram(GrammarParser.ProgramContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitMain_function(GrammarParser.Main_functionContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitStatements(GrammarParser.StatementsContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitStatement(GrammarParser.StatementContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitPrint_stmt(GrammarParser.Print_stmtContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitPrint_sconst_stmt(GrammarParser.Print_sconst_stmtContext ctx) {
-        System.out.println(ctx.STRING().getText());
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitPrint_var_stmt(GrammarParser.Print_var_stmtContext ctx) {
-        System.out.println(conf.get(ctx.IDENTIFIER().getText()));
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitVar_decl_stmt(GrammarParser.Var_decl_stmtContext ctx) {
-        String id = ctx.IDENTIFIER().getText();
-        Value v = visit(ctx.expression());
-
-        conf.update(id, v);
-
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Value visitVar_assign_stmt(GrammarParser.Var_assign_stmtContext ctx) {
-
-    }
-
-    @Override
-    public Value visitIfelseendif(GrammarParser.IfelseendifContext ctx) {
-
-    }
-
-    @Override
-    public Value visitIfendid(GrammarParser.IfendidContext ctx) {
-
-    }
-
-    @Override
-    public Value visitWhile_stmt(GrammarParser.While_stmtContext ctx) {
-        while(visit(ctx.getChild(1)) == 1)
-    }*/
 }
