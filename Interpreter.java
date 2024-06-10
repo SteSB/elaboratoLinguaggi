@@ -1,10 +1,12 @@
-import value.ExpValue;
-import value.StringValue;
-import value.Value;
-
-import java.util.*;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Deque;
+import java.util.ArrayDeque;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.stream.Collectors;
 import java.util.function.Function;
+
 
 public class Interpreter extends GrammarBaseVisitor<Object> {
 
@@ -72,7 +74,8 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
 
         if (functions.containsKey(id)) {
             FunctionInfo function = functions.get(id);
-            callStack.push(function);
+            FunctionInfo newContext = new FunctionInfo(function.name, function.staticDepth + 1, function.functionBody, function.parameters);
+            callStack.push(newContext);
 
             List<GrammarParser.ExpressionContext> args = ctx.expression();
             if (args.size() != function.parameters.size()) {
@@ -82,11 +85,11 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
             for (int i = 0; i < args.size(); i++) {
                 String paramName = function.parameters.get(i);
                 Object value = visit(args.get(i));
-                function.variables.put(paramName, value);
+                newContext.variables.put(paramName, value);
             }
 
             // Esegui il corpo della funzione
-            visit(function.functionBody);
+            visit(newContext.functionBody);
 
             callStack.pop();
 
@@ -161,6 +164,14 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
         String id = ctx.IDENTIFIER().getText();
         int value = (Integer) visit(ctx.expression());
         value = applyOperations(value, ctx.operations());
+        callStack.peek().variables.put(id, value);
+        return null;
+    }
+
+    @Override
+    public Object visitVar_assign_from_func_stmt(GrammarParser.Var_assign_from_func_stmtContext ctx) {
+        String id = ctx.IDENTIFIER().getText();
+        int value = (Integer) visit(ctx.call_function());
         callStack.peek().variables.put(id, value);
         return null;
     }
@@ -249,7 +260,7 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     @Override
     public Object visitEqualop(GrammarParser.EqualopContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> (x == var) ? 1 : 0);
+        return (Function<Integer, Integer>) (x -> x == var ? 1 : 0);
     }
 
     @Override
@@ -259,14 +270,15 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitOrop(GrammarParser.OropContext ctx) {
+    public Object visitAndop(GrammarParser.AndopContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> (x == 1 || var == 1) ? 1 : 0);
+        return (Function<Integer, Integer>) (x -> x != 0 && var != 0 ? 1 : 0);
     }
 
     @Override
-    public Object visitAndop(GrammarParser.AndopContext ctx) {
+    public Object visitOrop(GrammarParser.OropContext ctx) {
         int var = (Integer) visit(ctx.getChild(1));
-        return (Function<Integer, Integer>) (x -> (x == 1 && var == 1) ? 1 : 0);
+        return (Function<Integer, Integer>) (x -> x != 0 || var != 0 ? 1 : 0);
     }
+
 }
