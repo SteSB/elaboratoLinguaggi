@@ -10,50 +10,44 @@ import java.util.function.Function;
 
 public class Interpreter extends GrammarBaseVisitor<Object> {
 
-    private Map<String, FunctionInfo> functions = new HashMap<>();
-    private Deque<FunctionInfo> callStack = new ArrayDeque<>();
-    private Object returnValue = null;
+    private final Map<String, FunctionInfo> functions = new HashMap<>();    // memorizzo ogni funzione
+    private final Deque<FunctionInfo> callStack = new ArrayDeque<>();       // memorizzo l'ordine di chiamata per sapere quale funzione è in esecuzione
+    private Object returnValue = null;                                      // valore di ritorno delle funzioni
 
-    private static class FunctionInfo {
+    private static class FunctionInfo {         // per ogni funzione salvo il nome, le variabili, il corpo (da eseguire in un secondo momento) e gli eventuali parametri
         String name;
         Map<String, Object> variables;
-        int staticDepth;
         GrammarParser.StatementsContext functionBody;
         List<String> parameters;
 
-        FunctionInfo(String name, int staticDepth, GrammarParser.StatementsContext functionBody, List<String> parameters) {
+        FunctionInfo(String name, GrammarParser.StatementsContext functionBody, List<String> parameters) {
             this.name = name;
             this.variables = new HashMap<>();
-            this.staticDepth = staticDepth;
             this.functionBody = functionBody;
             this.parameters = parameters;
         }
     }
 
     @Override
-    public Object visitProgram(GrammarParser.ProgramContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
     public Object visitMain_function(GrammarParser.Main_functionContext ctx) {
-        FunctionInfo mainFunction = new FunctionInfo("main", 0, ctx.statements(), new ArrayList<>());
+        FunctionInfo mainFunction = new FunctionInfo("main", ctx.statements(), new ArrayList<>());
         functions.put("main", mainFunction);
 
         callStack.push(mainFunction);
 
-        visitChildren(ctx.statements());
+        visitChildren(ctx.statements());            // il main viene subito eseguito
 
         callStack.pop();
 
         return null;
     }
 
+    // una funzione viene semplicemente memorizzata, con o senza parametri a seconda della tipologia di funzione
+    /*--------------------------------------------------*/
     @Override
     public Object visitVoidfunction(GrammarParser.VoidfunctionContext ctx) {
         String id = ctx.IDENTIFIER().getText();
-        int staticDepth = callStack.isEmpty() ? 0 : callStack.peek().staticDepth + 1;
-        FunctionInfo function = new FunctionInfo(id, staticDepth, ctx.statements(), new ArrayList<>());
+        FunctionInfo function = new FunctionInfo(id, ctx.statements(), new ArrayList<>());
         functions.put(id, function);
         return null;
     }
@@ -61,41 +55,39 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     @Override
     public Object visitNovoidfunction(GrammarParser.NovoidfunctionContext ctx) {
         String id = ctx.IDENTIFIER().getText();
-        int staticDepth = callStack.isEmpty() ? 0 : callStack.peek().staticDepth + 1;
         List<String> parameters = ctx.arg().stream().map(arg -> arg.IDENTIFIER().getText()).collect(Collectors.toList());
-        FunctionInfo function = new FunctionInfo(id, staticDepth, ctx.statements(), parameters);
+        FunctionInfo function = new FunctionInfo(id, ctx.statements(), parameters);
         functions.put(id, function);
         return null;
     }
+    /*--------------------------------------------------*/
 
     @Override
     public Object visitCall_function(GrammarParser.Call_functionContext ctx) {
         String id = ctx.IDENTIFIER().getText();
 
-        if (functions.containsKey(id)) {
-            FunctionInfo function = functions.get(id);
-            FunctionInfo newContext = new FunctionInfo(function.name, function.staticDepth + 1, function.functionBody, function.parameters);
-            callStack.push(newContext);
+        if (functions.containsKey(id)) {        // controllo che la funzione sia stata dichiarata
+            FunctionInfo function = functions.get(id);      // la recupero
+            FunctionInfo newContext = new FunctionInfo(function.name, function.functionBody, function.parameters);
+            callStack.push(newContext);         // aggiungo la funzione allo stack
 
-            List<GrammarParser.ExpressionContext> args = ctx.expression();
+            List<GrammarParser.ExpressionContext> args = ctx.expression();      // controllo che ci siano tutti i parametri richiesti dalla dichiarazione
             if (args.size() != function.parameters.size()) {
                 throw new RuntimeException("Numero di argomenti non corrisponde per la funzione " + id);
             }
 
-            for (int i = 0; i < args.size(); i++) {
+            for (int i = 0; i < args.size(); i++) {     // memorizzo ogni parametro come una variabile locale (copia dei valori)
                 String paramName = function.parameters.get(i);
                 Object value = visit(args.get(i));
                 newContext.variables.put(paramName, value);
             }
 
-            // Esegui il corpo della funzione
-            visit(newContext.functionBody);
+            visit(newContext.functionBody);         // eseguo la funzione
 
             callStack.pop();
 
-            // Restituisci il valore di ritorno
             Object ret = returnValue;
-            returnValue = null; // Resetta il valore di ritorno per la prossima chiamata di funzione
+            returnValue = null;         // Resetta il valore di ritorno per la prossima chiamata di funzione
             return ret;
         } else {
             throw new RuntimeException("Errore nella chiamata alla funzione " + id);
@@ -106,7 +98,7 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     public Object visitReturn_function(GrammarParser.Return_functionContext ctx) {
         String id = ctx.IDENTIFIER().getText();
 
-        if (!callStack.isEmpty() && callStack.peek().variables.containsKey(id)) {
+        if (!callStack.isEmpty() && callStack.peek().variables.containsKey(id)) {       // recupero il valore da ritornare nello stack e lo salvo in una variaible globale (returnValue)
             returnValue = callStack.peek().variables.get(id);
         } else {
             throw new RuntimeException("Variable " + id + " not defined.");
@@ -116,24 +108,9 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitStatements(GrammarParser.StatementsContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Object visitStatement(GrammarParser.StatementContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Object visitPrint_stmt(GrammarParser.Print_stmtContext ctx) {
-        return visitChildren(ctx);
-    }
-
-    @Override
-    public Object visitPrint_sconst_stmt(GrammarParser.Print_sconst_stmtContext ctx) {
+    public Object visitPrint_sconst_stmt(GrammarParser.Print_sconst_stmtContext ctx) {      // stampa di una stringa
         String text = ctx.STRING().getText();
-        if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
+        if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {       // elimino le ""
             text = text.substring(1, text.length() - 1);
         }
         System.out.println(text);
@@ -141,9 +118,9 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     }
 
     @Override
-    public Object visitPrint_var_stmt(GrammarParser.Print_var_stmtContext ctx) {
+    public Object visitPrint_var_stmt(GrammarParser.Print_var_stmtContext ctx) {    // stampa variabili
         String id = ctx.getChild(1).getText();
-        if (callStack.peek().variables.containsKey(id)) {
+        if (!callStack.isEmpty() && callStack.peek().variables.containsKey(id)) {   // recupero il valore dall'ambiente
             System.out.println(callStack.peek().variables.get(id));
         } else {
             throw new RuntimeException("Variable " + id + " not defined.");
@@ -155,7 +132,8 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     public Object visitVar_decl_stmt(GrammarParser.Var_decl_stmtContext ctx) {
         String id = ctx.IDENTIFIER().getText();
         int value = (Integer) visit(ctx.expression());
-        callStack.peek().variables.put(id, value);
+        if(!callStack.isEmpty())
+            callStack.peek().variables.put(id, value);      // creo una nuova variaible locale (aggiungo all'ambiente)
         return null;
     }
 
@@ -163,8 +141,9 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     public Object visitVar_assign_stmt(GrammarParser.Var_assign_stmtContext ctx) {
         String id = ctx.IDENTIFIER().getText();
         int value = (Integer) visit(ctx.expression());
-        value = applyOperations(value, ctx.operations());
-        callStack.peek().variables.put(id, value);
+        int v = applyOperations(value, ctx.operations());
+        if(!callStack.isEmpty())
+            callStack.peek().variables.put(id, v);      // modifico il valore di una variabile
         return null;
     }
 
@@ -172,20 +151,27 @@ public class Interpreter extends GrammarBaseVisitor<Object> {
     public Object visitVar_assign_from_func_stmt(GrammarParser.Var_assign_from_func_stmtContext ctx) {
         String id = ctx.IDENTIFIER().getText();
         int value = (Integer) visit(ctx.call_function());
-        callStack.peek().variables.put(id, value);
+        if(!callStack.isEmpty())
+            callStack.peek().variables.put(id, value);          // ottengo il valore da una funzione e lo salvo nella variaibile
         return null;
     }
 
     private int applyOperations(int initialValue, GrammarParser.OperationsContext ctx) {
-        Function<Integer, Integer> operation = (Function<Integer, Integer>) visit(ctx);
-        return operation.apply(initialValue);
+        Object result = visit(ctx);
+        if (result instanceof Function) {
+            @SuppressWarnings("unchecked")
+            Function<Integer, Integer> operation = (Function<Integer, Integer>) result;
+            return operation.apply(initialValue);
+        } else {
+            throw new RuntimeException("Expected a function operation, but got: " + result.getClass().getName());
+        }
     }
 
     @Override
     public Object visitVarexpr(GrammarParser.VarexprContext ctx) {
         String id = ctx.IDENTIFIER().getText();
-        for (FunctionInfo elm : callStack)
-            if(elm.variables.containsKey(id))
+        for (FunctionInfo elm : callStack)          // ottengo il valore di una variabile
+            if(elm.variables.containsKey(id))       // ciclo tutte le variaibili dell'ambiente finchè non trovo quella con l'id corretto
                 return elm.variables.get(id);
         throw new RuntimeException("Variable " + id + " not defined.");
     }
